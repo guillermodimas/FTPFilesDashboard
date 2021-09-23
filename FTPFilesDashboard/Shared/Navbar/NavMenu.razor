@@ -1,0 +1,37 @@
+﻿<nav class="navbar navbar-expand-md navbar-light bg-white mb-4">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="/">
+            <img src="/Images/microsoft-azure-3-logo-svgrepo-com.svg" height="60" alt="">
+        </a>
+        <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarResponsive" aria-controls="navbarResponsive" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarResponsive">
+            <ul class="navbar-nav ml-auto">
+
+                
+                <li class="nav-item">
+                    <NavLink class="nav-link" href="https://github.com/guillermodimas/FTPFilesDashboard" target="_blank">
+                        <i class="fab fa-github"></i> <strong>Github</strong>
+                    </NavLink>
+                </li>
+                
+            </ul>
+        </div>
+    </div>
+</nav>
+
+@code{
+    private bool isDebug = false;
+
+    protected override void OnInitialized()
+    {
+#if DEBUG
+        isDebug = true;
+#else
+isDebug = false;
+#endif
+        //string test = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+    }
+
+}

@@ -1,0 +1,388 @@
+﻿@page "/blobfiles"
+@page "/"
+@inject AzureStorageHelper AzureStorageHelper
+@inject IConfiguration Configuration
+@inject IRecordingsData _data
+@inject ILogger<BlobFiles> _logger
+
+
+
+
+@using System.Net
+
+
+<PageProgress Visible="uploadProgress.IsLoadingStep1" Value="@uploadProgress.step1percent">@uploadProgress.step1percent%</PageProgress>
+<PageProgress Visible="uploadProgress.IsLoadingStep2" Color="Color.Success" Value="Convert.ToInt32(uploadProgress.uploadPercentage)"> @uploadProgress.uploadPercentage%</PageProgress>
+
+<div class="row justify-content-center">
+    <div class="col-sm-5">
+        <h3>Archived Zoom Recordings</h3>
+    </div>
+    <div class="col-sm-7">
+        <Form>
+            <Addons>
+
+
+                <Addon AddonType="AddonType.Body">
+                    
+                    <TextEdit @bind-Text="@keywordSearch" Placeholder="Search By Keyword (do not include spaces for MEETING ID's')" />
+                
+                </Addon>
+                <Addon AddonType="AddonType.End">
+                    <Button Type="ButtonType.Submit" PreventDefaultOnSubmit="true" Block="true" Clicked="@LoadRecordingsByKeyword" Loading="@(recordings == null ? true : false)" Color="Color.Success">@(recordings == null ? "" : "Search")</Button>
+                   
+                </Addon>
+
+
+
+            </Addons>
+        </Form>
+    </div>
+
+
+</div>
+@if (string.IsNullOrEmpty(keywordSearch))
+{
+    <div class="row mt-3">
+        <div class="col-sm-12">
+            <div class="alert alert-warning" role="alert">
+                <h4 class="alert-heading">Enter Search Keywords</h4>
+                <p>Enter keywords in order to display search results.</p>
+            </div>
+        </div>
+    </div>
+
+}
+else
+{
+    <div class="row mt-3">
+        <div class="col-sm-12">
+            @if (recordings != null)
+            {
+                <DataGrid Class="table-responsive-sm" TItem="RecordingsModel"
+                          Data="@recordings" ShowPager="true" Sortable="true" PageSize="10" Hoverable="false" RowSelectable=@((item)=>item.RecordingID == "0") SelectedRowStyling="@OnSelectedRowStyling" RowHoverCursor="(item)=>Blazorise.Cursor.Default">
+                    <ChildContent>
+                        <DataGridColumn TItem="RecordingsModel" Field="@nameof(RecordingsModel.RecordingID)" Sortable="false" Width="160px">
+                            <CaptionTemplate>
+                                <td style="display:none">Emppty title for accessibility</td>
+                            </CaptionTemplate>
+                            <DisplayTemplate>
+                                <Button Color="Color.Primary" Disabled="!string.IsNullOrEmpty(uploadProgress.recordingID)" Loading="@((context as RecordingsModel).GeneratedLink == "Loading")" Clicked="@(() => TestUploadAndDownload((context as RecordingsModel)))">@((context.GeneratedLink) == "Loading" ? (uploadProgress.IsLoadingStep1 ? " Step 1 of 2: " + uploadProgress.step1percent + "%" : uploadProgress.IsLoadingStep1 == false && uploadProgress.IsLoadingStep2 ? " Step 2 of 2: " + uploadProgress.uploadPercentage +"%" : "Loading") : "Generate Link") </Button>
+                            </DisplayTemplate>
+                        </DataGridColumn>
+                        <DataGridColumn TItem="RecordingsModel" Field="@nameof(RecordingsModel.Host)" Caption="Host" Sortable="true"></DataGridColumn>
+                        <DataGridColumn TItem="RecordingsModel" Field="@nameof(RecordingsModel.MeetingID)" Caption="Meeting ID" Sortable="true"></DataGridColumn>
+                        <DataGridColumn TItem="RecordingsModel" Field="@nameof(RecordingsModel.MeetingDate)" Caption="Recording Date" Sortable="true">
+                            <DisplayTemplate>
+                                @((context as RecordingsModel).MeetingDate.ToShortDateString())
+                            </DisplayTemplate>
+                        </DataGridColumn>
+                        <DataGridColumn TItem="RecordingsModel" Field="@nameof(RecordingsModel.Topic)" Caption="Topic" Sortable="true"></DataGridColumn>
+                        <DataGridColumn TItem="RecordingsModel" Field="@nameof(RecordingsModel.FileType)" Caption="File Type" Sortable="true"></DataGridColumn>
+                        <DataGridColumn TItem="RecordingsModel" Field="@nameof(RecordingsModel.FileSizeMB)" Caption="File Size (MBs)" Sortable="true">
+                            <DisplayTemplate>
+                                @((context as RecordingsModel).FileSizeMB)
+                            </DisplayTemplate>
+                        </DataGridColumn>
+                        <DataGridColumn TItem="RecordingsModel" Field="@nameof(RecordingsModel.GeneratedLink)" Caption="Link" Width="120px" Sortable="true">
+                            <DisplayTemplate>
+                                @if (!string.IsNullOrEmpty(context.GeneratedLink))
+                                {
+                                    @if ((context.GeneratedLink) == "Loading")
+                                    {
+                                        <a>Loading...</a>
+                                    }
+                                    else
+                                    {
+                                        if (DateTime.Now >= context.LinkExpirationDate)
+                                        {
+                                            <a>Link Expired</a>
+                                        }
+                                        else
+                                        {
+                                            <a href="@(context.GeneratedLink)">Public Link</a>
+                                        }
+                                    }
+                                }
+                            </DisplayTemplate>
+                        </DataGridColumn>
+                        <DataGridColumn TItem="RecordingsModel" Field="@nameof(RecordingsModel.LinkExpirationDate)" Caption="Link Expiration" Sortable="true"></DataGridColumn>
+                    </ChildContent>
+                    <EmptyTemplate>
+
+                        <Alert Color="Color.Secondary" Style="text-align: center" Visible="true">
+                            <AlertDescription>No Recording(s) Found</AlertDescription>
+                        </Alert>
+
+                    </EmptyTemplate>
+                </DataGrid>
+            }
+            else
+            {
+                <span>Loading...</span>
+            }
+        </div>
+    </div>
+}
+
+
+
+
+
+
+
+
+
+
+@code
+{
+    [Inject] INotificationService snackbarStack { get; set; }
+
+    [CascadingParameter]
+    private Task<AuthenticationState> authenticationStateTask { get; set; }
+
+    private string keywordSearch { get; set; } = "";
+
+
+    List<string> BlobFileUrls = new List<string>();
+    private List<RecordingsModel> recordings { get; set; } = new List<RecordingsModel>();
+    private UploadProgress uploadProgress { get; set; } = new UploadProgress();
+    private class UploadProgress
+    {
+        public bool IsLoadingStep1 { get; set; } = false;
+        public bool IsCompletedStep1 { get; set; } = false;
+        public int step1percent { get; set; } = 0;
+        public long step1UploadedBytes { get; set; }
+        public bool IsLoadingStep2 { get; set; } = false;
+        public bool IsCompletedStep2 { get; set; } = false;
+        public long uploadFileSize { get; set; } = 0;
+        public double uploadPercentage { get; set; } = 0;
+        public string recordingID { get; set; } = "";
+    }
+
+    private async Task DownloadVideoFromFTP(RecordingsModel recording)
+    {
+        await snackbarStack.Info($"Step 1 of 2 - Starting FTP recording download");
+        uploadProgress = new UploadProgress();
+        uploadProgress.recordingID = recording.RecordingID;
+        uploadProgress.IsLoadingStep1 = true;
+        await InvokeAsync(StateHasChanged);
+
+
+
+        string name = $"{recording.RecordingID}.{recording.FileType}";
+
+        //string url = "ftp://192.168.195.100:21//FTP/07-23-2021/" + name;
+        string url = recording.BackupLocation;
+
+
+        // Delete the file if it already exists in our \Files folder
+        if (File.Exists("Files/" + name))
+        {
+            File.Delete("Files/" + name);
+        }
+
+
+        NetworkCredential credentials = new NetworkCredential(Configuration["FTPLogin:Username"], Configuration["FTPLogin:Password"]);
+        FtpWebRequest downloadRequest = (FtpWebRequest)WebRequest.Create(url);
+        downloadRequest.Credentials = credentials;
+        downloadRequest.Method = WebRequestMethods.Ftp.DownloadFile;
+
+
+
+        DateTime startTime = DateTime.UtcNow;
+
+
+        long size = recording.FileSize;
+
+
+
+
+
+
+        WebResponse response = downloadRequest.GetResponse();
+        using (Stream responseStream = response.GetResponseStream())
+        {
+            using (Stream fileStream = File.OpenWrite($@"Files/{name}")) //write to local file in project folder
+            {
+                byte[] buffer = new byte[4096];
+                int bytesRead = responseStream.Read(buffer, 0, 4096);
+
+
+
+
+                while (bytesRead > 0)
+                {
+                    await Task.Run(() =>
+                    {
+                        uploadProgress.step1UploadedBytes = uploadProgress.step1UploadedBytes + bytesRead;
+                        uploadProgress.step1percent = Convert.ToInt32(uploadProgress.step1UploadedBytes * 100 / size);
+                        //Testing = $"Downloading {name} {percent}%";
+                        InvokeAsync(StateHasChanged);
+
+
+                        fileStream.Write(buffer, 0, bytesRead);
+                        DateTime nowTime = DateTime.UtcNow;
+                        if ((nowTime - startTime).TotalMinutes > 5)
+                        {
+                            throw new ApplicationException(
+                                "Download timed out");
+                        }
+                        bytesRead = responseStream.Read(buffer, 0, 4096);
+                    });
+
+
+
+                }
+
+                uploadProgress.step1percent = 100;
+                uploadProgress.IsLoadingStep1 = false;
+                uploadProgress.IsCompletedStep1 = true;
+                await snackbarStack.Info($"Step 1 of 2 - Completed download");
+                await InvokeAsync(StateHasChanged);
+
+
+            }
+        }
+        response.Close();
+    }
+    private async Task UploadToAzure(RecordingsModel recording)
+    {
+        string name = $"{recording.RecordingID}.{recording.FileType}";
+
+        uploadProgress.IsLoadingStep2 = true;
+        await InvokeAsync(StateHasChanged);
+
+
+        await snackbarStack.Info($"Step 2 of 2 - Starting Link Generation - Uploading...");
+        // upload to Azure Storage
+        string baseUrl = Configuration["StorageBaseUrl"];
+
+
+        var container = AzureStorageHelper.OpenContianer();
+        var progressHandler = new Progress<long>();
+        progressHandler.ProgressChanged += UploadProgressChanged;
+
+        string sourceFilename = "Files/" + name;
+        string destFileName = name;
+
+
+        var file = new FileInfo(sourceFilename);
+        uploadProgress.uploadFileSize = file.Length;
+
+        BlobClient blob = container.GetBlobClient(destFileName);
+
+
+        blob.DeleteIfExists();
+
+
+        //blob.Upload(sourceFilename, progressHandler: progressHandler);
+        await blob.UploadAsync(sourceFilename, progressHandler: progressHandler);
+
+       
+        // return the url to the blob
+        string result = $"{baseUrl}{container.Name}\\{ destFileName}";
+
+        //string result = await AzureStorageHelper.UploadFile("Files/" + name, name, true);
+        if (result == "")
+        {
+            //Testing = "Error uploading file";
+        }
+        else
+        {
+
+            await snackbarStack.Info($"Step 2 of 2 - Completed - Link Generated");
+            
+            recording.GeneratedLink = result;
+
+
+            recording.CreatedBy = Configuration["Author"];
+           
+
+            recording.LinkCreatedOn = DateTime.Now;
+            recording.LinkExpirationDate = DateTime.Now.AddDays(Convert.ToInt32(Configuration["BlobExpiresInDays"]));
+            var index = recordings.FindIndex(x => x.RecordingID == recording.RecordingID);
+            recordings[index] = recording;
+            _data.GenerateLink(recording);
+
+        }
+
+
+
+        uploadProgress.IsLoadingStep2 = false;
+        uploadProgress.IsCompletedStep2 = true;
+        uploadProgress.recordingID = null;
+        await InvokeAsync(StateHasChanged);
+
+    }
+    private async Task TestUploadAndDownload(RecordingsModel recording)
+    {
+        try
+        {
+            recordings.Single(x => x.RecordingID == recording.RecordingID).GeneratedLink = "Loading";
+            StateHasChanged();
+
+            await Task.Delay(300);
+            await DownloadVideoFromFTP(recording);
+            await InvokeAsync(StateHasChanged);
+
+            await UploadToAzure(recording);
+            await InvokeAsync(StateHasChanged);
+
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, ex.Message);
+            await snackbarStack.Error($"Error generating link {ex.Message}");
+        }
+        finally
+        {
+            string name = $"{recording.RecordingID}.{recording.FileType}";
+            // Delete local file
+            File.Delete("Files/" + name);
+            uploadProgress = new UploadProgress();
+        }
+
+    }
+
+    private double GetProgressPercentage(double totalSize, double currentSize)
+    {
+        return (currentSize / totalSize) * 100;
+    }
+    private async void UploadProgressChanged(object sender, long bytesUploaded)
+    {
+        uploadProgress.uploadPercentage = (int)GetProgressPercentage(uploadProgress.uploadFileSize, bytesUploaded);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    async Task ListFiles()
+    {
+        BlobFileUrls = await AzureStorageHelper.GetFileList();
+        await InvokeAsync(StateHasChanged);
+    }
+    async Task LoadRecordingsByKeyword()
+    {
+        recordings = null;
+        await Task.Delay(300);
+        recordings = _data.LoadZoomRecordingsByKeyword(keywordSearch);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (File.Exists("Files/" + "NEEDEDFORDEPLOY.txt"))
+        {
+            
+        }
+
+       
+    }
+    void OnSelectedRowStyling(RecordingsModel recording, DataGridRowStyling styling)
+    {
+        styling.Background = Background.White;
+    }
+    static double ConvertBytesToMegabytes(long bytes)
+    {
+        return (bytes / 1024f) / 1024f;
+    }
+}

@@ -1,0 +1,31 @@
+﻿@inherits LayoutComponentBase
+@using FTPFilesDashboard.Shared.Navbar
+
+<NavMenu></NavMenu>
+<main role="main" class="container">
+    @Body
+    <div id="blazor-error-ui">
+        <div class="alert alert-danger alert-dismissible fade show" style="" role="alert">
+            <strong>Error:</strong>
+
+            <environment include="Staging,Production">
+                An error has occurred. This application may no longer respond until reloaded.
+            </environment>
+            <environment include="Development">
+                An unhandled exception has occurred. See browser dev tools for details.
+            </environment>
+            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">×</span>
+            </button>
+        </div>
+    </div>
+
+
+</main>
+
+
+<style>
+    .container, .container-lg, .container-md, .container-sm, .container-xl {
+        max-width: 1200px !important;
+    }
+</style>
